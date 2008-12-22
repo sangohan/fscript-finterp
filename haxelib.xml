@@ -1,7 +1,7 @@
-<project name="swhx" url="http://haxe.org/swhx" license="LGPL">
-    <user name="swhx"/>
-    <user name="ncannasse"/>
-    <description>Screenweaver haXe enables the creation of Flash interfaced desktop applications using haXe</description>
-    <version name="1.2.0">haXe 2.0 support (see CHANGES.txt)</version>
-	<depends name="systools"/>
+<project name="fscript" url="http://code.google.com/p/fscript-finterp/" license="LGPL">
+    <user name="chasek"/>
+    <description>A fully functional hscript compiler that targets AVM2 bytecode through hxasm</description>
+    <version name="1.0">Initial alpha release</version>
+	<depends name="hscript"/>
+    <depends name="hxasm"/>
 </project>
