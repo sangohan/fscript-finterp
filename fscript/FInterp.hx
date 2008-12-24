@@ -25,6 +25,28 @@ import hscript.Expr;
 import flash.events.Event;
 
 /**
+* A local variable can either be just an identifier or a parameter (stored 
+* in registers);
+*/
+enum Local {
+    Param(reg : Int);
+    Ident(realName : String);
+}
+
+/**
+* The locals defined inside of a block.
+*/
+typedef Block = Hash<Local>;
+
+/**
+* The information needed to create a function closure.
+*/
+typedef Function = {
+    var e : Expr;
+    var blockState : List<Block>;
+};
+
+/**
 * A replacement for the [Interp] class in the hscript library. Instead of 
 * interpreting the program, it is instead compiled to flash AVM2 assembly code.
 */
@@ -64,6 +86,13 @@ class FInterp {
     * DO NOT USE THIS VALUE AS A VARIABLE OR FUNCTION NAME.
     */
     public static var FUNCTION_NAME     = "__finterp__function";
+    
+    /**
+    * The name used prepend a new variable inside of a block.
+    * 
+    * DO NOT USE THIS VALUE AS A VARIABLE OR FUNCTION NAME.
+    */
+    public static var BLOCK_VAR_NAME    = "__finterp__block";
     
     /**
     * The number of times that [FInterp::execute] has been called.
@@ -119,7 +148,7 @@ class FInterp {
     /**
     * The list of functions defined in the body of the program.
     */
-    private var funcs           : List<Expr>;
+    private var funcs           : List<Function>;
     
     /**
     * The total number of functions defined inside the body of the program.
@@ -127,6 +156,23 @@ class FInterp {
     * NOTE: This differs from [funcs.length].
     */
     private var numFuncs        : Int;
+    
+    /**
+    * The locals of the program structured as a stack to emulate haXe blocks.
+    */
+    private var blocks          : List<Block>;
+    
+    /**
+    * The number of blocks used so far.
+    * 
+    * Used to maintain unique identifiers.
+    */
+    private var blockCount      : Int;
+    
+    /**
+    * The top-most block of the program.
+    */
+    private var firstBlock      : Block;
     
     /**
     * Creates a new FInterp instance.
@@ -177,6 +223,15 @@ class FInterp {
     * them to their default values, call [resetVariables].
     */
     public function execute(e : Expr, onComplete : Dynamic -> Void) {
+        blocks          = new List();
+        blockCount      = 0;
+        
+        firstBlock      = enterBlock();
+
+        for (variable in variables.keys()) {
+            firstBlock.set(variable, Ident(variable));
+        }
+        
         loopManagers    = new List();
         funcs           = new List();
         numFuncs        = 0;
@@ -220,6 +275,66 @@ class FInterp {
         );
         loader.loadBytes(out.getBytes().getData());
 	}
+    
+    /**
+    * Enters a new block and returns the hash of locals.
+    */
+    function enterBlock() : Block {
+        blockCount++;
+        
+        var block = new Hash<Local>();
+        blocks.push(block);
+        return block;
+    }
+    
+    /**
+    * Exits the current block and moves up the chain of locals.
+    */
+    function exitBlock() {
+        blocks.pop();
+    }
+    
+    /**
+    * Makes a structual copy of a list (ie it does not copy the elements
+    * themselves, just the list structure).
+    */
+    function copy<T>(list : List<T>) : List<T> {
+        var c = new List<T>();
+        for (elem in list) c.push(elem);
+        return c;
+    }
+    
+    /**
+    * Returns the local definition with the given name.
+    * 
+    * This searches from the "lowest" block up to the "highest."
+    * 
+    * Throws an error if no such local exists.
+    */
+    function getLocal(name : String) : Local {
+        for (block in blocks) {
+            if (block.exists(name)) return block.get(name);
+        }
+        
+        throw "No such local: " + name;
+    }
+    
+    /**
+    * Creates a new local at the current block level.
+    * 
+    * If [param] isn't supplied (default value of -1), then the local is an 
+    * identifier, and a new mangled name is returned inside of an [Ident] enum.
+    * Otherwise if the param register [param] is given, then [Param(param)] is
+    * returned.
+    */
+    function addLocal(name : String, param = -1) : Local {
+        var local = 
+                if (param == -1)    Ident(BLOCK_VAR_NAME + blockCount + name)
+                else                Param(param);
+        blocks.first().set(name, local);
+        
+        return local;
+    }
     
     /**
     * Evaluates the expression and returns the last value or null if no such 
@@ -321,17 +436,26 @@ class FInterp {
                 
                 switch (id) {
                     case "true":    context.op(OTrue);
-                    case "false":   context.op(ONull);
-                    case "null":    context.op(OFalse);
+                    case "false":   context.op(OFalse);
+                    case "null":    context.op(ONull);
                     
                     default:
-                        context.op(OThis);
-                        incStack();
                         
-                        var ref     = NName(context.string(id), pub);
-                        var name    = context.name(ref);
-                        context.op(OGetProp(name)); 
-                        decStack();
+                        switch (getLocal(id)) {
+                            
+                            case Ident(n):
+                                context.op(OThis);
+                                incStack();
+                                
+                                var ref     = NName(context.string(n), pub);
+                                var name    = context.name(ref);
+                                context.op(OGetProp(name)); 
+                                decStack();
+                                
+                            case Param(reg):
+                                context.op(OReg(reg));
+                                
+                        }
                 }
             
             /**
@@ -345,7 +469,12 @@ class FInterp {
                 
                 expr(e);
                 
-                var ref     = NName(context.string(n), pub);
+                var realName = switch(addLocal(n)) {
+                    case Ident(rn):     rn;
+                    default:            throw "Expecting Ident";
+                }
+                
+                var ref     = NName(context.string(realName), pub);
                 var name    = context.name(ref);
                 context.op(OSetProp(name));
                 decStack(2);
@@ -365,10 +494,13 @@ class FInterp {
             * Increases the stack by 1.
             */
             case EBlock(exprs):
+                enterBlock();
+                
                 var initStack = stack;
                 for (e in exprs) expr(e);
                 
                 setStackTo(1, initStack);
+                exitBlock();
                 
             /**
             * Places the field [f] of [e] on top of the stack.
@@ -531,6 +663,8 @@ class FInterp {
             * This has no effect on the stack size when completed.
             */
             case EWhile(econd,e):
+                enterBlock();
+                
                 var manager = new LoopManager(context, this);
                 loopManagers.push(manager);
                 
@@ -546,7 +680,9 @@ class FInterp {
                 manager.addBackwardJump(JAlways);
                 
                 manager.finalize();
-                loopManagers.remove(manager); 
+                loopManagers.remove(manager);
+                
+                exitBlock();
             
             /**
             * Breaks the loop in which the statement was found.
@@ -605,7 +741,8 @@ class FInterp {
             */
             case ENew(c,params):
                 if (!variables.exists(c)) {
-                    variables.set(c, Type.resolveClass(c)); 
+                    variables.set(c, Type.resolveClass(c));
+                    firstBlock.set(c, Ident(c));
                 }
                 expr(EIdent(c));
                 
@@ -660,10 +797,33 @@ class FInterp {
             * defered until the main execution function is completed.
             */
             case EFunction(params, fe, name):
+                if (name != null) {
+                    for (func in funcs) {
+                        
+                        var fname = switch (func.e) {
+                            
+                            case EFunction(_, _, name): name;
+                            default:                    null;
+                            
+                        };
+                        
+                        if (fname == name) {
+                            expr(EIdent(name));
+                            return;
+                        } 
+                    }
+                }
+            
                 var n = if (name == null) FUNCTION_NAME + numFuncs
                            else name;
+                           
+                firstBlock.set(n, Ident(n));
+                
                 expr(EIdent(n));
-                funcs.add(EFunction(params, fe, n));
+                funcs.add( { e          : EFunction(params, fe, n),
+                             blockState : copy(blocks) } );
+                
+                
             
             /**
             * Evaluates and throw's [e].
@@ -841,15 +1001,23 @@ class FInterp {
             * Assigns the top to the local variable [id].
             */
             case EIdent(id):
-                context.op(OThis);
-                incStack();
-                
-                context.op(OSwap);
-                
-                var ref     = NName(context.string(id), pub);
-                var name    = context.name(ref);
-                context.op(OSetProp(name));
-                decStack(2);
+                switch (getLocal(id)) {
+                            
+                    case Ident(n):
+                        context.op(OThis);
+                        incStack();
+                        
+                        context.op(OSwap);
+                                
+                        var ref     = NName(context.string(n), pub);
+                        var name    = context.name(ref);
+                        context.op(OSetProp(name)); 
+                        decStack(2);
+                                
+                    case Param(reg):
+                        context.op(OSetReg(reg));
+                                
+                }
                 
             /**
             * Assigns the top to field [f] of object [oe].
@@ -883,15 +1051,15 @@ class FInterp {
     }
     
     /**
-    * Handles the function [e] defined inside of the program.
+    * Handles the function [func] defined inside of the program.
     * 
     * The return value and every paramter is specified to be of type [Object].
     * This also resets [stack] and [maxStack].
     * 
     * NOTE: The function should have already been assigned a name by [expr].
     */
-    function handleFunction(e) {
-        switch(e) {
+    function handleFunction(func : Function) {
+        switch(func.e) {
             
             case EFunction(params, fe, name):
                 var obj         = context.type("Object");
@@ -904,19 +1072,21 @@ class FInterp {
                 stack           = 0;
                 pub             = context.nsPublic; //is this needed?
                 
+                var old         = copy(blocks);
+                blocks          = func.blockState;
+                enterBlock();
+                
                 //registers 1 through [params.length] are params
                 var register    = 1; 
-                for (param in params) {
-                    context.op(OReg(register++));
-                    incStack();
-                    
-                    assignTopTo(EIdent(param));
-                }
+                for (param in params) addLocal(param, register++);
                 
                 exprReturn(fe);
+                
+                exitBlock();
+                blocks          = old;
                 m.maxStack      = maxStack;
             
-            default: throw "Expecting function expression, got " + e;
+            default: throw "Expecting function expression, got " + func.e;
         }
     }
     
