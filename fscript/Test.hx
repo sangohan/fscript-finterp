@@ -54,8 +54,8 @@ class Test {
 		["var a = [1,[2,[3,[4,null]]]]; var t = 0; while( a != null ) { t += a[0]; a = a[1]; }; t",10],
 		["var t = 0; for( x in 1...10 ) t += x; t",45],
 		["var t = 0; for( x in new IntIter(1,10) ) t +=x; t",45],
-		//["var x = 1; try { var x = 66; throw 789; } catch( e : Dynamic ) e + x",790],
-		//["var x = 1; var f = function(x) throw x; try f(55) catch( e : Dynamic ) e + x",56],
+		["var x = 1; try { var x = 66; throw 789; } catch( e : Dynamic ) e + x",790],
+		["var x = 1; var f = function(x) throw x; try f(55) catch( e : Dynamic ) e + x",56],
     ];
     
 	static function test() {
