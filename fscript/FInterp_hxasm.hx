@@ -20,11 +20,10 @@ package fscript;
 
 #if flash9
 
-import format.abc.Data;
-import format.abc.Context;
-import format.abc.Writer;
-import format.swf.Data;
-import format.swf.Writer;
+import hxasm.Bytecode;
+import hxasm.Context;
+import hxasm.Writer;
+import hxasm.Output;
 import hscript.Expr;
 import flash.events.Event;
 
@@ -129,7 +128,7 @@ class FInterp {
     /**
     * The main execution method.
     */
-    private var method          : Function;
+    private var method          : Method;
     
     /**
     * Corresponds to [FINTERP_INSTANCES].
@@ -284,8 +283,7 @@ class FInterp {
         className       = CLASS_NAME + Std.string(instanceNum);
         
         context         = new Context();
-		var interpClass = context.beginClass(className);
-        interpClass.namespace = context.nsPublic;
+		context.beginClass(className);
         
         method          = context.beginMethod(EXECUTE_NAME, [],
                                               context.type("Object"), true);
@@ -296,7 +294,6 @@ class FInterp {
         exprReturn(e);
         
         method.maxStack = maxStack;
-        context.endMethod();
         
         //handle all of the functions defined in the program
         while (funcs.length > 0) {
@@ -305,20 +302,9 @@ class FInterp {
         }
         
         context.finalize();
-        var as3Bytes    = new haxe.io.BytesOutput();
-        format.abc.Writer.write(as3Bytes, context.getData());
         
         var out         = new haxe.io.BytesOutput();
-        var swfWriter   = new format.swf.Writer(out);
-        swfWriter.writeHeader({ version : 9, compressed : false, width : 400, 
-                                height : 300, 
-                                fps : format.swf.Tools.toFixed8(30), 
-                                nframes : 1 });
-                                
-        swfWriter.writeTag(TSandBox(25));
-        swfWriter.writeTag(TActionScript3(as3Bytes.getBytes()));
-        swfWriter.writeTag(TShowFrame);
-        swfWriter.writeEnd();
+        Writer.write(out, context);
         
         var loader      = new flash.display.Loader();
         var me          = this;
@@ -1183,7 +1169,6 @@ class FInterp {
                 exitBlock();
                 blocks          = old;
                 m.maxStack      = maxStack;
-                context.endMethod();
             
             default: throw "Expecting function expression, got " + func.e;
         }
