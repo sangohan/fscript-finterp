@@ -20,10 +20,11 @@ package fscript;
 
 #if flash9
 
-import hxasm.Bytecode;
-import hxasm.Context;
-import hxasm.Writer;
-import hxasm.Output;
+import format.abc.Data;
+import format.abc.Context;
+import format.abc.Writer;
+import format.swf.Data;
+import format.swf.Writer;
 import hscript.Expr;
 import flash.events.Event;
 
@@ -128,7 +129,7 @@ class FInterp {
     /**
     * The main execution method.
     */
-    private var method          : Method;
+    private var method          : Function;
     
     /**
     * Corresponds to [FINTERP_INSTANCES].
@@ -283,17 +284,19 @@ class FInterp {
         className       = CLASS_NAME + Std.string(instanceNum);
         
         context         = new Context();
-		context.beginClass(className);
+		var interpClass = context.beginClass(className);
+        interpClass.namespace = context.nsPublic;
         
         method          = context.beginMethod(EXECUTE_NAME, [],
                                               context.type("Object"), true);
         pub             = context.nsPublic;
-        maxStack        = 1;
+        maxStack        = 0;
         stack           = 0;
         
         exprReturn(e);
         
         method.maxStack = maxStack;
+        context.endMethod();
         
         //handle all of the functions defined in the program
         while (funcs.length > 0) {
@@ -302,9 +305,30 @@ class FInterp {
         }
         
         context.finalize();
+        writeAndLoad(onComplete);
+	}
+    
+    /**
+    * Writes the data held in context into ABC format and includes it in a new
+    * swf. Then, the new swf is loaded and the program is executed.
+    * 
+    * NOTE: Variables defined in [variables] are loaded once the swf is loaded.
+    */
+    function writeAndLoad(onComplete : Dynamic -> Void) {
+        var as3Bytes    = new haxe.io.BytesOutput();
+        format.abc.Writer.write(as3Bytes, context.getData());
         
         var out         = new haxe.io.BytesOutput();
-        Writer.write(out, context);
+        var swfWriter   = new format.swf.Writer(out);
+        swfWriter.writeHeader({ version : 9, compressed : false, width : 400, 
+                                height : 300, 
+                                fps : format.swf.Tools.toFixed8(30), 
+                                nframes : 1 });
+                                
+        swfWriter.writeTag(TSandBox(25));
+        swfWriter.writeTag(TActionScript3(as3Bytes.getBytes()));
+        swfWriter.writeTag(TShowFrame);
+        swfWriter.writeEnd();
         
         var loader      = new flash.display.Loader();
         var me          = this;
@@ -322,7 +346,7 @@ class FInterp {
         );
         
         loader.loadBytes(out.getBytes().getData());
-	}
+    }
     
     /**
     * Enters a new block and returns the hash of locals.
@@ -1169,6 +1193,7 @@ class FInterp {
                 exitBlock();
                 blocks          = old;
                 m.maxStack      = maxStack;
+                context.endMethod();
             
             default: throw "Expecting function expression, got " + func.e;
         }
