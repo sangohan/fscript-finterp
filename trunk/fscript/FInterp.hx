@@ -341,7 +341,13 @@ class FInterp {
                     Reflect.setField(c, v, me.variables.get(v));
                 }
                 
-                onComplete(Reflect.field(c, EXECUTE_NAME)());
+                var value   = Reflect.field(c, EXECUTE_NAME)();
+                
+                for (v in me.variables.keys()) {
+                    me.variables.set(v, Reflect.field(c, v));
+                }
+                
+                onComplete(value);
             }
         );
         
@@ -903,6 +909,7 @@ class FInterp {
             
                 var n = if (name == null) FUNCTION_NAME + numFuncs
                            else name;
+                numFuncs++;
                            
                 firstBlock.set(n, Ident(n));
                 
