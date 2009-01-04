@@ -825,7 +825,7 @@ class FInterp {
             /**
             * Adds a new instance of the given class [c] to the stack.
             * 
-            * If the given name [c] doesn't exist in [variables] then this 
+            * If the given name [c] doesn't exist in the locals then this 
             * tries to look for it using [Type.resolveClass].
             * 
             * The [params] are passed to the constructor function.
@@ -833,10 +833,13 @@ class FInterp {
             * Increases the stack by 1.
             */
             case ENew(c,params):
-                if (!variables.exists(c)) {
+                try {
+                    getLocal(c);
+                } catch (e : Dynamic) {
                     variables.set(c, Type.resolveClass(c));
                     firstBlock.set(c, Ident(c));
                 }
+                
                 expr(EIdent(c));
                 
                 for (e in params) expr(e);
