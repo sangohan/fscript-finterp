@@ -517,6 +517,7 @@ class FInterp {
                     case CInt(v):       context.op(OInt(v));
                     case CFloat(f):     context.op(OFloat(context.float(f)));
                     case CString(s):    context.op(OString(context.string(s)));
+                    case CInt32(v):     context.op(OInt(haxe.Int32.toInt(v)));
                 }
             
             /**
