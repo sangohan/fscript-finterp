@@ -1,0 +1,1 @@
+This is a supplement to the haXe hscript library that replaces the Interp class. Instead of interpreting the expression set, FInterp compiles it to flash actionscript 3.0 (AVM2) byte code, making it much faster.
